@@ -1,41 +1,30 @@
 mod store;
 use std::sync::{Arc, Mutex};
+use tokio::{io::AsyncWriteExt, net::TcpListener};
 
 use crate::store::Store;
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = Arc::new(Mutex::new(Store::new()));
-    let store_one = Arc::clone(&store);
-    let store_two = Arc::clone(&store);
 
-    let handle_one = std::thread::spawn(move || {
-        store_one
-            .lock()
-            .unwrap()
-            .set("test1".to_string(), "valueA".to_string(), None);
-        store_one
-            .lock()
-            .unwrap()
-            .set("test2".to_string(), "valueB".to_string(), None);
-    });
+    let listener = TcpListener::bind("127.0.0.1:6379").await?;
 
-    let handle_two = std::thread::spawn(move || {
-        store_two
-            .lock()
-            .unwrap()
-            .set("testA".to_string(), "value1".to_string(), None);
-        store_two
-            .lock()
-            .unwrap()
-            .set("testB".to_string(), "value2".to_string(), None);
-    });
+    loop {
+        let (mut socket, addr) = listener.accept().await?;
+        println!("New connection from {}", addr);
 
-    handle_one.join().unwrap();
-    handle_two.join().unwrap();
+        let _store = Arc::clone(&store); // shadowed clone
+        tokio::spawn(async move {
+            socket
+                .write(handler().as_bytes())
+                .await
+                .expect("expected to write to socket");
+            // store is usable here
+        });
+    }
+}
 
-    let s = store.lock().unwrap();
-    println!("{}", s.get("test1").unwrap().value());
-    println!("{}", s.get("test2").unwrap().value());
-    println!("{}", s.get("testA").unwrap().value());
-    println!("{}", s.get("testB").unwrap().value());
+fn handler() -> String {
+    "+PONG\r\n".to_string()
 }
